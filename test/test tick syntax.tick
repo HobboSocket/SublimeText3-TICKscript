@@ -1,0 +1,185 @@
+// TICKscripts must include the database and retention policy declaration dbrp
+dbrp "telegraf"."autogen"
+// comment
+
+var test string
+var test = ( pippo )
+var test = ( pippo + 12 )
+var test string
+// comment
+var vstring string
+// comment
+var ruleName = 'rule'
+// comment
+var ruleName = (variable + 'rule')
+// comment
+var ruleName = variable + 'rule'
+// comment
+var old_standby = ('foo' / 'bar' / variable)
+// comment
+var old_standby = !('foo' * 'bar' + variable)
+var old_standby = -('foo' OR 'bar' ! variable)
+// comment
+var old_standby = 'foo' + 'bar' - variable + foo('asd')
+// comment
+var vduration duration
+// comment
+var vduration = 1h
+// comment
+var vduration = -1h
+// comment
+var vduration = [ +1u, -1µ, 1.0ms, 12.5s, 1m, 123d, -1.0w ]
+// comment
+var vint int
+var vint = 1
+var vint = -1
+var vint = +123
+var vint = !123
+var vboolean = TRUE
+var vboolean = !TRUE
+var vboolean = !variable
+// comment
+var vboolean = FALSE
+var vfloat float
+var vfloat = 1.0
+var vfloat = -1.0
+var vfloat = +1.0
+var vlambda lambda
+var vlambda = lambda: float("total_error_responses")/float("total_responses", fload()) * 100.0s
+// comment
+var whereFilter = lambda: TRUE
+var grpBy = ['host']
+var grpBy = ['host', 1.0 ] 
+var grpBy = ['host', 1 + 2.0 ]
+var grpBy = ['host', (1 + 2.0) ]
+var grpBy = ['host', variable, 1ms ]
+var grpBy = [*]
+
+var regex = /asda\(.*\)\/sd/
+
+var tstream = stream
+var tbatch = batch
+
+var msg = 'Alert: text {{ index .Tags "host" }}/{{ index .Tags "tag" }} text {{ .Level }}'
+var msgDetails = '''text <b>{{ index .Tags "host" }}/{{ index .Tags "tag" }}</b> used space 
+{{ if eq .Level "OK" }}back to normal{{else}}reached {{ .Level }} level{{end}}<br>
+<ul><li>Used space: {{ index .Fields "used_percent" | printf "%0.3f" }}%</li></ul>'''
+var ruleID = ruleName + '-{{.Group}}'
+
+var tagID = 'alertID'
+var tagLvl = 'level'
+var fldMsg = 'message'
+var fldDuration = 'duration'
+var outputDB = 'chronograf'
+var outputRP = 'autogen'
+var outputMeasurement = 'alerts'
+var triggerType = 'threshold'
+
+batch.stream
+	|from()
+
+stream
+// comment
+	|from()
+// comment
+		.measurement()
+// comment
+		.measurement ('SADAD')
+// comment
+		.measurement	("asdasd")
+		.measurement (variable)
+		.measurement(1.0 - 2 + 3)
+		.measurement    	(TRUE OR FALSE)
+
+data
+	|from()
+		.asdasd()
+		.pasdasd()
+	|alert()
+		-as()
+
+var data = batch
+// comment
+	|query('''
+		SELECT "etime" - "stime" AS "elapsed", "err"
+		FROM "telegraf"."autogen".measurement
+		// no comment
+		''')
+// comment
+		.period(6h)
+// comment
+		.every(6h)
+		.groupBy(grpBy)
+		.align()
+
+var data = stream
+	|from()
+		.measurement(measure)
+		.where(whereFilter)
+		.groupBy(grpBy)
+
+	|eval( lambda: (1.0 - float("free") / float("size")) * 100.0 )
+// comment
+	|eval(lambda: !(cpu_idle > +70))
+// comment
+	|eval(lambda: !(cpu_idle == 70))
+// comment
+	|eval(lambda: status > warn OR delta > sigma)
+// comment
+	|eval(lambda: TRUE)
+// comment
+	|eval(lambda: tag =~ /^cz\d+/)
+// comment
+	|eval(lambda: 'tag' =~ /^cz\/\d+/ AND delta > sigma(12 * 'test'))
+// comment
+	|eval(lambda: tag =~ asdasd )
+// comment
+	|eval(lambda: tag !~ /^cz\d+/)
+// comment
+	|eval(lambda: tag !~ vregexp AND delta > sigma (12 * 'test'))
+// comment
+	|eval(lambda: "tag" !~ vregexp)
+// comment
+	|eval(lambda: !FALSE)
+// comment
+	|eval(lambda: if("field" > threshold AND "field" != 0, 'true', 'false'))
+// comment
+		.as('used_percent')
+// comment
+
+var trigger = data
+	|alert()
+		// .info(lambda: "used_percent" >= 75.0)
+		.warn(lambda: "used_percent" >= 80.0)
+// comment
+		.crit(lambda: "used_percent" >= 90.0)
+		.crit(lambda: "uptime_derivative" < -120.0)
+		// log ony state changes not for each problem
+		.stateChangesOnly ()
+		
+		.id(ruleID)
+		.message(msg)
+		.details(msgDetails)
+		
+		// tagging
+		.idTag(tagID)
+		.levelTag(tagLvl)
+		.messageField(fldMsg)
+		.durationField(fldDuration)
+
+		// Write each alert to a file.
+		.log('/tmp/alerts.log')
+		.email()
+			.to('test@example.com')
+
+trigger
+	|influxDBOut()
+		.create()
+		.database(outputDB)
+		.retentionPolicy(outputRP)
+		.measurement(outputMeasurement)
+		.tag('alertRuleName', ruleName)
+		.tag('triggerType', triggerType)
+
+//trigger
+//	|httpOut('output')

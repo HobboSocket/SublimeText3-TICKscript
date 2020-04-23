@@ -1,0 +1,282 @@
+%YAML 1.2
+---
+name: TICKscript
+file_extensions: [tick]
+scope: source.tick
+
+variables:
+  char_escape: \\x\h{2}|\\u\h{4}|\\U\h{8}|\\[0-7]{3}|\\.
+
+  # These are the only words that can't be used as identifiers.
+  keyword: \b(?:AND|OR|lambda|var|dbrp|TRUE|FALSE)\b
+
+  ident: \b(?!{{keyword}})[[:alpha:]_][[:alnum:]_]*\b
+
+  # https://docs.influxdata.com/kapacitor/v1.5/tick/syntax/#variables-and-literals
+  predeclared_type: \b(?:string|duration|int|float|lambda)\b
+
+  chain_operator: \||\.|@
+
+contexts:
+  # EBNF grammar specification -> https://docs.influxdata.com/kapacitor/v1.5/reference/spec/
+  main:
+    - include: match-statement
+
+  match-statement:
+    - include: match-comment
+    - include: match-keyword-dbrp
+    - include: match-declaration
+    - include: match-expression
+
+  match-keyword-dbrp:
+    - match: '\bdbrp\b'
+      scope: keyword.control.tick
+      push:
+        - include: match-reference
+        - match: '\.'
+          scope: keyword.operator.tick
+        - include: pop-on-terminator
+
+  match-declaration:
+    - match: '\bvar\b'
+      scope: storage.type.keyword.var.tick
+      push:
+        - match: '{{ident}}'
+          scope: variable.declaration.tick
+          set: pop-var-type-or-assignment
+        # pop if matched nothing -> probable syntax error
+        - include: pop-before-nonblank
+  
+  pop-var-type-or-assignment:
+    # added explicit regex matching to avoid ambiguities due to double division
+    # expressions like 'var a = c / foo(b) / e'
+    - match: '=(?=\s*\/)'
+      scope: keyword.operator.assignment.tick
+      push:
+        - include: match-regexp
+        - include: pop-on-terminator
+    - match: '='
+      scope: keyword.operator.assignment.tick
+      push:
+        - include: match-keyword-lambda
+        - include: match-brackets
+        - include: match-expression
+        - include: pop-on-terminator
+    - match: '{{predeclared_type}}'
+      scope: storage.type.tick support.type.builtin.tick
+      pop: true
+    - include: pop-before-nonblank
+
+  match-expression:
+    - match: '\b(stream|batch)\b'
+      scope: variable.language.tick
+    - include: match-chain
+    - include: match-function
+    - include: match-lambdaexpr       # Added: needed to match "var a = b + c" (without parens)
+    # - include: match-primary        # Removed: already contained in "lambdaexpr"
+
+  match-primary:
+    - match: '\('
+      scope: punctuation.section.parens.begin.tick
+      push:
+        - include: match-lambdaexpr
+        - match: '\)'
+          scope: punctuation.section.parens.end.tick
+          pop: true
+    - include: match-string
+    - include: match-reference
+    - include: match-number
+    # - include: match-regexp         # Removed: moved regex matching only where possible to avoid ambiguities
+    - include: match-star
+    - include: match-function         # Replaces LFunc because here it is the same and far more flexible
+    - match: '{{ident}}'
+      scope: variable.other.tick
+
+  match-function:
+    - match: '({{ident}})\s*(\()'
+      captures:
+        1: variable.function.tick
+        2: punctuation.section.parens.begin.tick
+      push:
+        - include: match-parameter
+        - match: ','
+          scope: punctuation.separator.tick
+        - match: '\)'
+          scope: punctuation.section.parens.end.tick
+          pop: true
+
+  match-chain:
+    - match: '{{chain_operator}}'
+      scope: keyword.operator.chain.tick
+      push:
+        - include: match-function
+        - match: '{{ident}}'
+          scope: variable.function.tick
+          pop: true
+        - include: pop-on-terminator
+
+  match-parameter:
+    - include: match-keyword-lambda
+    - include: match-expression
+    # - include: match-primary      # Removed: Expression already matches Primary
+
+  match-keyword-lambda:
+    - match: '\b(lambda)(\:)'
+      captures:
+        1: keyword.control.tick
+        2: punctuation.separator.tick
+      push:
+        - include: match-lambdaexpr
+        - match: ''
+          pop: true
+
+  # Essentially a Primay with optional operators
+  match-lambdaexpr:
+    - include: match-primary
+    - include: match-operators
+
+  pop-before-nonblank:
+    - match: (?=\S)
+      pop: true
+
+  pop-on-terminator:
+    - match: $
+      pop: true
+
+  match-comment:
+    - match: '//'
+      scope: punctuation.definition.comment.tick
+      push:
+        - meta_scope: comment.line.tick
+        - match: '$\n?'
+          pop: true
+
+  match-regexp:
+    - match: '/'
+      scope: punctuation.definition.regexp.begin.tick
+      push:
+        - meta_scope: string.regexp.tick
+        - match: '\\/'
+          scope: string.regexp.tick
+        - match: '/'
+          scope: punctuation.definition.regexp.end.tick
+          pop: true
+
+  match-brackets:
+    - match: \[
+      scope: punctuation.section.brackets.begin.tick
+      push:
+        - include: match-lambdaexpr
+        - match: ','
+          scope: punctuation.separator.tick
+        - match: \]
+          scope: punctuation.section.brackets.end.tick
+          pop: true
+
+  match-operators: [
+    # regex operators may be followed by regex or Expression
+    {match: \=\~   , 
+      scope: keyword.operator.regex.tick,
+      push: [{include: match-regexp}, {include: pop-before-nonblank}]
+    },
+    {match: \!\~  ,
+      scope: keyword.operator.regex.tick,
+      push: [{include: match-regexp}, {include: pop-before-nonblank}]
+    },
+    {match: \+   , scope: keyword.operator.math.tick},
+    {match: \-   , scope: keyword.operator.math.tick},
+    {match: \*   , scope: keyword.operator.math.tick},
+    {match: /    , scope: keyword.operator.math.tick},
+    {match: ==   , scope: keyword.operator.logical.tick},
+    {match: \!=  , scope: keyword.operator.logical.tick},
+    {match: <=   , scope: keyword.operator.logical.tick},
+    {match: \>=  , scope: keyword.operator.logical.tick},
+    {match: <    , scope: keyword.operator.logical.tick},
+    {match: \>   , scope: keyword.operator.logical.tick},
+    {match: \!   , scope: keyword.operator.logical.tick},
+    {match: \bAND\b   , scope: keyword.operator.logical.tick},
+    {match: \bOR\b    , scope: keyword.operator.logical.tick}
+  ]
+
+  match-star:
+    - match: \*
+      scope: keyword.operator.tick
+
+  match-number:
+    - match: '\b\d+(?:\.\d+)?(?:[uµmshdw]|ms)\b'
+      scope: constant.numeric.tick
+    - match: '\b\d+(?:\.\d+)?\b'
+      scope: constant.numeric.tick
+    - match: '\b(?:TRUE|FALSE)\b'
+      scope: constant.boolean.tick
+
+  match-string:
+    - match: "'"
+      scope: punctuation.definition.string.begin.tick
+      push:
+        - meta_scope: string.quoted.single.tick
+        - include: match-go-template
+        - match: '{{char_escape}}'
+          scope: constant.character.escape.tick
+        - match: "'"
+          scope: punctuation.definition.string.end.tick
+          pop: true
+
+    - match: "'''"
+      scope: punctuation.definition.string.begin.tick
+      push:
+        - meta_scope: string.quoted.triple.tick
+        - include: match-go-template
+        - match: "'''"
+          scope: punctuation.definition.string.end.tick
+          pop: true
+
+  # Used to reference fields
+  match-reference:
+    - match: '"'
+      scope: punctuation.definition.string.begin.tick
+      push:
+        - include: match-go-template
+        - meta_scope: string.quoted.double.tick
+        - match: '{{char_escape}}'
+          scope: constant.character.escape.tick
+        - match: '"'
+          scope: punctuation.definition.string.end.tick
+          pop: true
+
+  # Thanks to Go sublime syntax
+  match-go-template:
+    - match: '{{(?=.*}})'
+      scope: punctuation.section.interpolation.begin.tick
+      push:
+        - meta_scope: meta.interpolation.tick
+        - clear_scopes: 1
+        - match: "}}"
+          scope: punctuation.section.interpolation.end.tick
+          pop: true
+        - match: "\\s-"
+          scope: keyword.operator.template.right.trim.tick
+        - match: "-\\s"
+          scope: keyword.operator.template.left.trim.tick
+        - match: ":=|="
+          scope: keyword.operator.assignment.tick
+        - match: \|
+          scope: keyword.operator.template.pipe.tick
+        - match: '(\.)([\w]+)'
+          captures:
+            1: punctuation.accessor.dot.tick
+            2: variable.other.member.tick
+        - match: '(\$)[\w]+'
+          scope: variable.other.template.tick
+          captures:
+            1: punctuation.definition.variable.tick
+        - match: '[.$]'
+          scope: variable.other.template.tick
+        - match: \b(if|else|range|template|with|end|nil|define|block)\b
+          scope: keyword.control.tick
+        - match: \b(and|call|html|index|slice|js|len|not|or|print|printf|println|urlquery|eq|ne|lt|le|gt|ge)\b
+          scope: variable.function.tick support.function.builtin.tick
+        - include: match-comment
+        - include: match-string
+        - include: match-reference
+
